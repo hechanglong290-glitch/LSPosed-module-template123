@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Xposed Module Template</string>
+    <string name="xposed_description">This is an Xposed module template based on libxposed.</string>
+</resources>
