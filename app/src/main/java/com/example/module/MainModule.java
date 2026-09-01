@@ -6,17 +6,9 @@ import androidx.annotation.NonNull;
 
 import java.lang.reflect.Method;
 
-import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
-import io.github.libxposed.api.XposedModuleInterface;
 
 public class MainModule extends XposedModule {
-
-    public MainModule(
-            XposedInterface base,
-            XposedModuleInterface.ModuleLoadedParam param) {
-        super(base, param);
-    }
 
     private static final long RAM_MULTIPLIER = 2L;
     private static final long STORAGE_MULTIPLIER = 4L;
@@ -107,8 +99,6 @@ public class MainModule extends XposedModule {
          * =====================================================
          * 2. ActivityManagerService
          * =====================================================
-         *
-         * 扫描所有方法名里包含 memory / meminfo / ram 的方法。
          */
 
         try {
