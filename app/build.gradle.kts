@@ -4,17 +4,13 @@ plugins {
 
 android {
     namespace = "com.example.module"
-    compileSdk = 36 // Can be modified as needed
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.module"
         minSdk = 28
         versionCode = 1
         versionName = "1.0.0"
-    }
-
-    lint {
-        targetSdk = 36
     }
 
     buildTypes {
