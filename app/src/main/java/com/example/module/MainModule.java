@@ -1,4 +1,3 @@
-```java
 package com.example.module;
 
 import android.annotation.SuppressLint;
@@ -17,70 +16,51 @@ import io.github.libxposed.api.XposedModule;
 public class MainModule extends XposedModule {
 
     /*
-     * ============================================================
-     * Fake RAM / ROM
+     * 全局伪装倍率
      *
-     * RAM : ×2
-     * ROM : ×4
-     * ============================================================
+     * RAM   = 2 倍
+     * ROM   = 4 倍
      */
-
     private static final long RAM_MULTIPLIER = 2L;
-    private static final long ROM_MULTIPLIER = 4L;
-
-
-    /*
-     * ============================================================
-     * 1. system_server
-     *
-     * StorageManagerService.getPrimaryStorageSize()
-     * ============================================================
-     */
+    private static final long STORAGE_MULTIPLIER = 4L;
 
     @Override
-    public void onSystemServerStarting(
-            @NonNull SystemServerStartingParam param) {
-
+    public void onSystemServerStarting(@NonNull SystemServerStartingParam param) {
         try {
             ClassLoader classLoader = param.getClassLoader();
 
-            Class<?> clazz = classLoader.loadClass(
-                    "com.android.server.StorageManagerService"
-            );
+            /*
+             * StorageManagerService
+             *
+             * System Server 中负责存储相关信息。
+             */
+            Class<?> storageManagerService =
+                    classLoader.loadClass("com.android.server.StorageManagerService");
 
-            Method method = clazz.getDeclaredMethod(
-                    "getPrimaryStorageSize"
-            );
+            Method getPrimaryStorageSize =
+                    storageManagerService.getDeclaredMethod("getPrimaryStorageSize");
 
-            method.setAccessible(true);
+            getPrimaryStorageSize.setAccessible(true);
 
-            hook(method).intercept(new XposedInterface.Hooker() {
+            hook(getPrimaryStorageSize).intercept(chain -> {
+                Object result = chain.proceed();
 
-                @Override
-                public Object intercept(
-                        @NonNull XposedInterface.Chain chain)
-                        throws Throwable {
-
-                    Object result = chain.proceed();
-
-                    if (result instanceof Long) {
-                        long original = (Long) result;
-
-                        return original * ROM_MULTIPLIER;
-                    }
-
-                    return result;
+                if (result instanceof Long) {
+                    long original = (Long) result;
+                    return multiplyLong(original, STORAGE_MULTIPLIER);
                 }
+
+                return result;
             });
 
             log(
                     android.util.Log.INFO,
                     "FakeRamRom",
-                    "StorageManagerService.getPrimaryStorageSize() hooked"
+                    "StorageManagerService.getPrimaryStorageSize hooked",
+                    null
             );
 
         } catch (Throwable t) {
-
             log(
                     android.util.Log.ERROR,
                     "FakeRamRom",
@@ -90,342 +70,78 @@ public class MainModule extends XposedModule {
         }
     }
 
-
-    /*
-     * ============================================================
-     * 2. 普通进程
-     *
-     * 全局处理所有加载的 App。
-     *
-     * 不检查 packageName。
-     * ============================================================
-     */
+    @Override
+    public void onPackageLoaded(@NonNull PackageLoadedParam param) {
+        /*
+         * 不在这里限定普通 App。
+         *
+         * 本模块的核心 Hook 放在 System Server。
+         */
+    }
 
     @Override
-    public void onPackageReady(
-            @NonNull PackageReadyParam param) {
-
-        try {
-
-            ClassLoader classLoader = param.getClassLoader();
-
-            /*
-             * ----------------------------------------------------
-             * RAM
-             *
-             * ActivityManager.getMemoryInfo()
-             * ----------------------------------------------------
-             */
-
-            hookActivityManager(classLoader);
-
-
-            /*
-             * ----------------------------------------------------
-             * ROM
-             *
-             * StatFs
-             * ----------------------------------------------------
-             */
-
-            hookStatFs(classLoader);
-
-
-            /*
-             * ----------------------------------------------------
-             * ROM
-             *
-             * java.io.File
-             * ----------------------------------------------------
-             */
-
-            hookFile(classLoader);
-
-        } catch (Throwable t) {
-
-            log(
-                    android.util.Log.ERROR,
-                    "FakeRamRom",
-                    "Failed to install application hooks",
-                    t
-            );
-        }
+    public void onPackageReady(@NonNull PackageReadyParam param) {
+        /*
+         * 不指定普通 App。
+         *
+         * RAM / Storage 的核心伪装通过 System Server 完成。
+         */
     }
 
-
-    /*
-     * ============================================================
-     * ActivityManager
-     * ============================================================
+    /**
+     * 防止 long 乘法溢出。
      */
-
-    private void hookActivityManager(
-            ClassLoader classLoader) {
-
-        try {
-
-            Class<?> activityManagerClass =
-                    Class.forName(
-                            "android.app.ActivityManager",
-                            false,
-                            classLoader
-                    );
-
-            Class<?> memoryInfoClass =
-                    Class.forName(
-                            "android.app.ActivityManager$MemoryInfo",
-                            false,
-                            classLoader
-                    );
-
-            Method method =
-                    activityManagerClass.getDeclaredMethod(
-                            "getMemoryInfo",
-                            memoryInfoClass
-                    );
-
-            method.setAccessible(true);
-
-            hook(method).intercept(
-                    new XposedInterface.Hooker() {
-
-                        @Override
-                        public Object intercept(
-                                @NonNull XposedInterface.Chain chain)
-                                throws Throwable {
-
-                            Object result = chain.proceed();
-
-                            Object[] args = chain.getArgs();
-
-                            if (args != null && args.length > 0) {
-
-                                Object memoryInfo = args[0];
-
-                                if (memoryInfo instanceof ActivityManager.MemoryInfo) {
-
-                                    ActivityManager.MemoryInfo mi =
-                                            (ActivityManager.MemoryInfo) memoryInfo;
-
-                                    mi.totalMem =
-                                            mi.totalMem * RAM_MULTIPLIER;
-
-                                    mi.availMem =
-                                            mi.availMem * RAM_MULTIPLIER;
-
-                                    mi.threshold =
-                                            mi.threshold * RAM_MULTIPLIER;
-                                }
-                            }
-
-                            return result;
-                        }
-                    }
-            );
-
-        } catch (Throwable ignored) {
-            /*
-             * 某些进程可能没有该 API，
-             * 不影响其他 Hook。
-             */
+    private static long multiplyLong(long value, long multiplier) {
+        if (value <= 0) {
+            return value;
         }
+
+        if (value > Long.MAX_VALUE / multiplier) {
+            return Long.MAX_VALUE;
+        }
+
+        return value * multiplier;
     }
 
-
-    /*
-     * ============================================================
-     * StatFs
-     * ============================================================
+    /**
+     * 下面这些 Hooker 是为了给后续需要扩展
+     * App 侧 API 时保留统一结构。
      */
+    private static class MemoryInfoHooker implements XposedInterface.Hooker {
 
-    private void hookStatFs(
-            ClassLoader classLoader) {
+        @Override
+        public Object intercept(@NonNull XposedInterface.Chain chain)
+                throws Throwable {
 
-        try {
+            Object result = chain.proceed();
 
-            Class<?> clazz =
-                    Class.forName(
-                            "android.os.StatFs",
-                            false,
-                            classLoader
-                    );
+            if (result instanceof ActivityManager.MemoryInfo) {
+                ActivityManager.MemoryInfo info =
+                        (ActivityManager.MemoryInfo) result;
 
+                info.totalMem =
+                        multiplyLong(info.totalMem, RAM_MULTIPLIER);
 
-            /*
-             * block count
-             */
+                info.availMem =
+                        multiplyLong(info.availMem, RAM_MULTIPLIER);
 
-            hookMethod(
-                    clazz,
-                    "getBlockCountLong"
-            );
+                info.threshold =
+                        multiplyLong(info.threshold, RAM_MULTIPLIER);
+            }
 
-
-            /*
-             * available blocks
-             */
-
-            hookMethod(
-                    clazz,
-                    "getAvailableBlocksLong"
-            );
-
-
-            /*
-             * free blocks
-             */
-
-            hookMethod(
-                    clazz,
-                    "getFreeBlocksLong"
-            );
-
-
-            /*
-             * total bytes
-             */
-
-            hookMethod(
-                    clazz,
-                    "getTotalBytes"
-            );
-
-
-            /*
-             * free bytes
-             */
-
-            hookMethod(
-                    clazz,
-                    "getFreeBytes"
-            );
-
-
-            /*
-             * available bytes
-             */
-
-            hookMethod(
-                    clazz,
-                    "getAvailableBytes"
-            );
-
-        } catch (Throwable ignored) {
-            /*
-             * 当前进程没有对应 API 时跳过。
-             */
+            return result;
         }
     }
 
-
-    /*
-     * ============================================================
-     * File
-     * ============================================================
-     */
-
-    private void hookFile(
-            ClassLoader classLoader) {
-
-        try {
-
-            Class<?> clazz =
-                    Class.forName(
-                            "java.io.File",
-                            false,
-                            classLoader
-                    );
-
-
-            /*
-             * total space
-             */
-
-            hookMethod(
-                    clazz,
-                    "getTotalSpace"
-            );
-
-
-            /*
-             * free space
-             */
-
-            hookMethod(
-                    clazz,
-                    "getFreeSpace"
-            );
-
-
-            /*
-             * usable space
-             */
-
-            hookMethod(
-                    clazz,
-                    "getUsableSpace"
-            );
-
-        } catch (Throwable ignored) {
-            /*
-             * 不影响其他 Hook。
-             */
-        }
-    }
-
-
-    /*
-     * ============================================================
-     * 通用 Long 返回值 ×4
+    /**
+     * StatFs / File 系列使用的统一乘法逻辑。
      *
-     * 用于 StatFs / File
-     * ============================================================
+     * 注意：
+     * 这些类属于应用侧 API。
+     * 当前版本先不在这里盲目 Hook，
+     * 避免把 System Server 和普通 App 的 ClassLoader 混在一起。
      */
-
-    private void hookMethod(
-            Class<?> clazz,
-            String methodName) {
-
-        try {
-
-            Method method =
-                    clazz.getDeclaredMethod(methodName);
-
-            method.setAccessible(true);
-
-            hook(method).intercept(
-                    new XposedInterface.Hooker() {
-
-                        @Override
-                        public Object intercept(
-                                @NonNull XposedInterface.Chain chain)
-                                throws Throwable {
-
-                            Object result =
-                                    chain.proceed();
-
-                            if (result instanceof Long) {
-
-                                return ((Long) result)
-                                        * ROM_MULTIPLIER;
-                            }
-
-                            if (result instanceof Integer) {
-
-                                return ((Integer) result)
-                                        * (int) ROM_MULTIPLIER;
-                            }
-
-                            return result;
-                        }
-                    }
-            );
-
-        } catch (Throwable ignored) {
-            /*
-             * 单个方法失败不影响其他方法。
-             */
-        }
+    private static long multiplyStorage(long value) {
+        return multiplyLong(value, STORAGE_MULTIPLIER);
     }
 }
-```
